@@ -1,0 +1,10 @@
+title       = "artinstitute"
+baseURL     = "https://artinstitute-cli.tamnd.com/"
+description = "A command line for artinstitute."
+contentDir  = "content"
+outputDir   = "public"
+theme       = "tago-doks"
+syntaxHighlight = "true"
+
+[params]
+github = "https://github.com/tamnd/artinstitute-cli"
