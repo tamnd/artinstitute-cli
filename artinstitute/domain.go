@@ -37,18 +37,20 @@ the rest of your tools. No API key required.`,
 func (Domain) Register(app *kit.App) {
 	app.SetClient(newClient)
 
-	kit.Handle(app, kit.OpMeta{Name: "artworks", Group: "read", List: true,
-		Summary: "List or search artworks (--search, --limit flags)"}, listArtworks)
+	kit.Handle(app, kit.OpMeta{Name: "search", Group: "read", List: true,
+		Summary: "Search artworks by query",
+		Args:    []kit.Arg{{Name: "query", Help: "search query e.g. monet"}}}, searchArtworks)
 
 	kit.Handle(app, kit.OpMeta{Name: "artwork", Group: "read", Single: true,
 		Summary: "Get a single artwork by ID",
 		Args:    []kit.Arg{{Name: "id", Help: "artwork numeric ID"}}}, getArtwork)
 
-	kit.Handle(app, kit.OpMeta{Name: "artists", Group: "read", List: true,
-		Summary: "List or search artists/agents (--search, --limit flags)"}, listArtists)
+	kit.Handle(app, kit.OpMeta{Name: "artist", Group: "read", List: true,
+		Summary: "Search artists by name or get by ID",
+		Args:    []kit.Arg{{Name: "query", Help: "artist name or ID"}}}, searchArtists)
 
 	kit.Handle(app, kit.OpMeta{Name: "exhibitions", Group: "read", List: true,
-		Summary: "List exhibitions (--limit flag)"}, listExhibitions)
+		Summary: "List museum exhibitions"}, listExhibitions)
 }
 
 // newClient builds the Client from kit config.
@@ -71,32 +73,33 @@ func newClient(_ context.Context, cfg kit.Config) (any, error) {
 
 // --- input structs ---
 
-type artworksInput struct {
-	Search string  `kit:"flag" help:"search query"`
-	Limit  int     `kit:"flag,inherit" help:"max results"`
+type searchInput struct {
+	Query  string  `kit:"arg" help:"search query e.g. monet"`
+	Limit  int     `kit:"flag,inherit" help:"max results" default:"10"`
 	Client *Client `kit:"inject"`
 }
 
 type artworkInput struct {
-	ID     string  `kit:"arg" help:"artwork numeric ID"`
+	ID     int     `kit:"arg" help:"artwork ID"`
 	Client *Client `kit:"inject"`
 }
 
-type artistsInput struct {
-	Search string  `kit:"flag" help:"search query"`
-	Limit  int     `kit:"flag,inherit" help:"max results"`
+type artistInput struct {
+	Query  string  `kit:"arg" help:"artist name or ID"`
+	Limit  int     `kit:"flag,inherit" help:"max results" default:"10"`
 	Client *Client `kit:"inject"`
 }
 
 type exhibitionsInput struct {
-	Limit  int     `kit:"flag,inherit" help:"max results"`
+	Status string  `kit:"flag" help:"filter by status: Open|Closed" default:""`
+	Limit  int     `kit:"flag,inherit" help:"max results" default:"10"`
 	Client *Client `kit:"inject"`
 }
 
 // --- handlers ---
 
-func listArtworks(ctx context.Context, in artworksInput, emit func(*Artwork) error) error {
-	items, err := in.Client.ListArtworks(ctx, in.Search, in.Limit)
+func searchArtworks(ctx context.Context, in searchInput, emit func(*Artwork) error) error {
+	items, err := in.Client.SearchArtworks(ctx, in.Query, in.Limit)
 	if err != nil {
 		return err
 	}
@@ -109,19 +112,15 @@ func listArtworks(ctx context.Context, in artworksInput, emit func(*Artwork) err
 }
 
 func getArtwork(ctx context.Context, in artworkInput, emit func(*Artwork) error) error {
-	id, err := strconv.Atoi(in.ID)
-	if err != nil {
-		return errs.Usage("artwork id must be a number, got %q", in.ID)
-	}
-	item, err := in.Client.GetArtwork(ctx, id)
+	item, err := in.Client.GetArtwork(ctx, in.ID)
 	if err != nil {
 		return err
 	}
 	return emit(item)
 }
 
-func listArtists(ctx context.Context, in artistsInput, emit func(*Agent) error) error {
-	items, err := in.Client.ListAgents(ctx, in.Search, in.Limit)
+func searchArtists(ctx context.Context, in artistInput, emit func(*Artist) error) error {
+	items, err := in.Client.SearchArtists(ctx, in.Query, in.Limit)
 	if err != nil {
 		return err
 	}
@@ -134,7 +133,7 @@ func listArtists(ctx context.Context, in artistsInput, emit func(*Agent) error) 
 }
 
 func listExhibitions(ctx context.Context, in exhibitionsInput, emit func(*Exhibition) error) error {
-	items, err := in.Client.ListExhibitions(ctx, in.Limit)
+	items, err := in.Client.ListExhibitions(ctx, in.Status, in.Limit)
 	if err != nil {
 		return err
 	}
@@ -147,8 +146,12 @@ func listExhibitions(ctx context.Context, in exhibitionsInput, emit func(*Exhibi
 }
 
 // Classify turns a URL or ID string into (type, id).
+// Numeric input is classified as "artwork"; anything else as "query".
 func (Domain) Classify(input string) (string, string, error) {
-	return "artwork", input, nil
+	if _, err := strconv.Atoi(input); err == nil {
+		return "artwork", input, nil
+	}
+	return "query", input, nil
 }
 
 // Locate returns the live https URL for a (type, id).
@@ -156,6 +159,8 @@ func (Domain) Locate(t, id string) (string, error) {
 	switch t {
 	case "artwork":
 		return fmt.Sprintf("https://%s/artworks/%s", SiteHost, id), nil
+	case "query":
+		return fmt.Sprintf("https://%s/collection?q=%s", SiteHost, id), nil
 	case "artist":
 		return fmt.Sprintf("https://%s/artists/%s", SiteHost, id), nil
 	case "exhibition":

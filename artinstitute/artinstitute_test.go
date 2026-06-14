@@ -32,25 +32,26 @@ func TestUserAgent(t *testing.T) {
 	defer ts.Close()
 
 	c := newTestClient(ts)
-	_, _ = c.ListArtworks(context.Background(), "", 5)
+	_, _ = c.SearchArtworks(context.Background(), "monet", 5)
 
 	if !strings.Contains(gotUA, "artinstitute-cli") {
 		t.Errorf("User-Agent = %q, want it to contain artinstitute-cli", gotUA)
 	}
 }
 
-// TestListArtworks checks that list response is parsed correctly.
-func TestListArtworks(t *testing.T) {
+// TestSearchArtworks checks that search response is parsed into Artwork fields.
+func TestSearchArtworks(t *testing.T) {
 	fixture := map[string]any{
 		"data": []any{
 			map[string]any{
-				"id":             27992,
-				"title":          "A Sunday on La Grande Jatte",
-				"artist_display": "Georges Seurat\nFrench, 1859-1891",
-				"date_display":   "1884-86",
-				"medium_display": "Oil on canvas",
-				"dimensions":     "207.5 x 308.1 cm",
-				"place_of_origin": "France",
+				"id":                  16568,
+				"title":               "Water Lilies",
+				"artist_title":        "Claude Monet",
+				"date_display":        "1906",
+				"medium_display":      "Oil on canvas",
+				"dimensions":          "89.9 × 94.1 cm",
+				"artwork_type_title":  "Painting",
+				"place_of_origin":     "France",
 			},
 		},
 	}
@@ -62,7 +63,7 @@ func TestListArtworks(t *testing.T) {
 	defer ts.Close()
 
 	c := newTestClient(ts)
-	artworks, err := c.ListArtworks(context.Background(), "", 5)
+	artworks, err := c.SearchArtworks(context.Background(), "monet", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,22 +71,31 @@ func TestListArtworks(t *testing.T) {
 		t.Fatalf("got %d artworks, want 1", len(artworks))
 	}
 	a := artworks[0]
-	if a.ID != 27992 {
-		t.Errorf("ID = %d, want 27992", a.ID)
+	if a.ID != 16568 {
+		t.Errorf("ID = %d, want 16568", a.ID)
 	}
-	if a.Title != "A Sunday on La Grande Jatte" {
+	if a.Title != "Water Lilies" {
 		t.Errorf("Title = %q", a.Title)
 	}
-	if !strings.Contains(a.URL, "27992") {
-		t.Errorf("URL %q should contain 27992", a.URL)
+	if a.Artist != "Claude Monet" {
+		t.Errorf("Artist = %q, want Claude Monet", a.Artist)
 	}
-	if a.ArtistDisplay == "" {
-		t.Error("ArtistDisplay should not be empty")
+	if a.Date != "1906" {
+		t.Errorf("Date = %q, want 1906", a.Date)
+	}
+	if a.Medium != "Oil on canvas" {
+		t.Errorf("Medium = %q", a.Medium)
+	}
+	if a.Type != "Painting" {
+		t.Errorf("Type = %q, want Painting", a.Type)
+	}
+	if a.Origin != "France" {
+		t.Errorf("Origin = %q, want France", a.Origin)
 	}
 }
 
-// TestSearchArtworks checks that the q param is forwarded when searching.
-func TestSearchArtworks(t *testing.T) {
+// TestSearchArtworksUsesSearchEndpoint checks that q is forwarded via /search path.
+func TestSearchArtworksUsesSearchEndpoint(t *testing.T) {
 	var gotPath string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -97,7 +107,7 @@ func TestSearchArtworks(t *testing.T) {
 	defer ts.Close()
 
 	c := newTestClient(ts)
-	_, err := c.ListArtworks(context.Background(), "monet", 5)
+	_, err := c.SearchArtworks(context.Background(), "monet", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,19 +116,21 @@ func TestSearchArtworks(t *testing.T) {
 	}
 }
 
-// TestGetArtwork checks single artwork parsing including thumbnail_url.
+// TestGetArtwork checks single artwork parsing including image_id and credit_line.
 func TestGetArtwork(t *testing.T) {
 	fixture := map[string]any{
 		"data": map[string]any{
-			"id":             27992,
-			"title":          "A Sunday on La Grande Jatte",
-			"artist_display": "Georges Seurat",
-			"date_display":   "1884-86",
-			"medium_display": "Oil on canvas",
-			"description":    "<p>Painted in dots...</p>",
-			"thumbnail": map[string]any{
-				"url": "https://www.artic.edu/iiif/2/abc/full/843,/0/default.jpg",
-			},
+			"id":                 16568,
+			"title":              "Water Lilies",
+			"artist_title":       "Claude Monet",
+			"date_display":       "1906",
+			"medium_display":     "Oil on canvas",
+			"dimensions":         "89.9 × 94.1 cm",
+			"artwork_type_title": "Painting",
+			"place_of_origin":    "France",
+			"description":        "<p>Painted at Giverny...</p>",
+			"image_id":           "3c27b499-af56-f0d5-93b5-a7f2f1ad5813",
+			"credit_line":        "Mr. and Mrs. Martin A. Ryerson Collection",
 		},
 	}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -129,31 +141,35 @@ func TestGetArtwork(t *testing.T) {
 	defer ts.Close()
 
 	c := newTestClient(ts)
-	a, err := c.GetArtwork(context.Background(), 27992)
+	a, err := c.GetArtwork(context.Background(), 16568)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.ID != 27992 {
-		t.Errorf("ID = %d, want 27992", a.ID)
+	if a.ID != 16568 {
+		t.Errorf("ID = %d, want 16568", a.ID)
 	}
 	if a.Description == "" {
 		t.Error("expected non-empty description")
 	}
-	if a.ThumbnailURL == "" {
-		t.Error("expected non-empty thumbnail_url")
+	if a.ImageID != "3c27b499-af56-f0d5-93b5-a7f2f1ad5813" {
+		t.Errorf("ImageID = %q", a.ImageID)
+	}
+	if a.CreditLine == "" {
+		t.Error("expected non-empty credit_line")
 	}
 }
 
-// TestListAgents checks that agents list is parsed with birth_date and agent_type.
-func TestListAgents(t *testing.T) {
+// TestSearchArtists checks that artist list is parsed with birth_date and null death_date.
+func TestSearchArtists(t *testing.T) {
 	fixture := map[string]any{
 		"data": []any{
 			map[string]any{
-				"id":               33736,
-				"title":            "Georges Seurat",
-				"birth_date":       1859,
-				"death_date":       1891,
-				"agent_type_title": "Individual",
+				"id":          35577,
+				"title":       "Claude Monet",
+				"birth_date":  1840,
+				"death_date":  nil,
+				"birth_place": "France, Paris",
+				"death_place": nil,
 			},
 		},
 	}
@@ -165,35 +181,39 @@ func TestListAgents(t *testing.T) {
 	defer ts.Close()
 
 	c := newTestClient(ts)
-	agents, err := c.ListAgents(context.Background(), "", 5)
+	artists, err := c.SearchArtists(context.Background(), "monet", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(agents) != 1 {
-		t.Fatalf("got %d agents, want 1", len(agents))
+	if len(artists) != 1 {
+		t.Fatalf("got %d artists, want 1", len(artists))
 	}
-	ag := agents[0]
-	if ag.Title != "Georges Seurat" {
-		t.Errorf("Title = %q", ag.Title)
+	ar := artists[0]
+	if ar.Name != "Claude Monet" {
+		t.Errorf("Name = %q", ar.Name)
 	}
-	if ag.BirthDate != 1859 {
-		t.Errorf("BirthDate = %d, want 1859", ag.BirthDate)
+	if ar.BirthDate != 1840 {
+		t.Errorf("BirthDate = %d, want 1840", ar.BirthDate)
 	}
-	if ag.AgentType != "Individual" {
-		t.Errorf("AgentType = %q, want Individual", ag.AgentType)
+	if ar.DeathDate != 0 {
+		t.Errorf("DeathDate = %d, want 0 for null", ar.DeathDate)
+	}
+	if ar.BirthPlace != "France, Paris" {
+		t.Errorf("BirthPlace = %q", ar.BirthPlace)
 	}
 }
 
-// TestListExhibitions checks that exhibitions are parsed with status and dates.
+// TestListExhibitions checks that exhibitions are parsed with description and dates.
 func TestListExhibitions(t *testing.T) {
 	fixture := map[string]any{
 		"data": []any{
 			map[string]any{
-				"id":          9526,
-				"title":       "Apostles of Beauty",
-				"status":      "Closed",
-				"aic_start_at": "2009-10-31T00:00:00.000Z",
-				"aic_end_at":  "2010-01-31T00:00:00.000Z",
+				"id":                9999,
+				"title":             "John Massey",
+				"short_description": "A show about design.",
+				"status":            "Closed",
+				"aic_start_at":      "2024-01-15T00:00:00-06:00",
+				"aic_end_at":        "2024-04-07T00:00:00-05:00",
 			},
 		},
 	}
@@ -205,7 +225,7 @@ func TestListExhibitions(t *testing.T) {
 	defer ts.Close()
 
 	c := newTestClient(ts)
-	exs, err := c.ListExhibitions(context.Background(), 5)
+	exs, err := c.ListExhibitions(context.Background(), "", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,8 +236,56 @@ func TestListExhibitions(t *testing.T) {
 	if ex.Status != "Closed" {
 		t.Errorf("Status = %q, want Closed", ex.Status)
 	}
+	if ex.Description != "A show about design." {
+		t.Errorf("Description = %q", ex.Description)
+	}
 	if ex.StartAt == "" {
 		t.Error("expected non-empty start_at")
+	}
+	if ex.EndAt == "" {
+		t.Error("expected non-empty end_at")
+	}
+}
+
+// TestListExhibitionsStatusFilter checks client-side status filtering.
+func TestListExhibitionsStatusFilter(t *testing.T) {
+	fixture := map[string]any{
+		"data": []any{
+			map[string]any{
+				"id":                1,
+				"title":             "Open Show",
+				"short_description": "Running now.",
+				"status":            "Open",
+				"aic_start_at":      "2024-01-01T00:00:00-06:00",
+				"aic_end_at":        "2024-12-31T00:00:00-06:00",
+			},
+			map[string]any{
+				"id":                2,
+				"title":             "Closed Show",
+				"short_description": "Past show.",
+				"status":            "Closed",
+				"aic_start_at":      "2023-01-01T00:00:00-06:00",
+				"aic_end_at":        "2023-06-01T00:00:00-05:00",
+			},
+		},
+	}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := json.Marshal(fixture)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(b)
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	exs, err := c.ListExhibitions(context.Background(), "Open", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exs) != 1 {
+		t.Fatalf("got %d exhibitions after filter, want 1", len(exs))
+	}
+	if exs[0].Status != "Open" {
+		t.Errorf("Status = %q, want Open", exs[0].Status)
 	}
 }
 
@@ -244,7 +312,7 @@ func TestRetryOn503(t *testing.T) {
 	c := artinstitute.NewClient(cfg)
 
 	start := time.Now()
-	_, err := c.ListArtworks(context.Background(), "", 5)
+	_, err := c.SearchArtworks(context.Background(), "monet", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,5 +321,42 @@ func TestRetryOn503(t *testing.T) {
 	}
 	if time.Since(start) < 500*time.Millisecond {
 		t.Error("retries did not back off")
+	}
+}
+
+// TestGetArtistByNumericQuery checks that a numeric query fetches a single artist by ID.
+func TestGetArtistByNumericQuery(t *testing.T) {
+	fixture := map[string]any{
+		"data": map[string]any{
+			"id":          35577,
+			"title":       "Claude Monet",
+			"birth_date":  1840,
+			"death_date":  1926,
+			"birth_place": "France, Paris",
+		},
+	}
+	var gotPath string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		b, _ := json.Marshal(fixture)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(b)
+	}))
+	defer ts.Close()
+
+	c := newTestClient(ts)
+	artists, err := c.SearchArtists(context.Background(), "35577", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artists) != 1 {
+		t.Fatalf("got %d artists, want 1", len(artists))
+	}
+	if artists[0].DeathDate != 1926 {
+		t.Errorf("DeathDate = %d, want 1926", artists[0].DeathDate)
+	}
+	// Should hit /artists/35577, not /artists?q=...
+	if !strings.Contains(gotPath, "35577") {
+		t.Errorf("path %q should contain 35577", gotPath)
 	}
 }

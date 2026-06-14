@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -31,70 +32,74 @@ const BaseURL = "https://" + Host + "/api/v1"
 
 // Artwork holds the public data about a single artwork.
 type Artwork struct {
-	ID            int    `json:"id"`
-	Title         string `json:"title"`
-	ArtistDisplay string `json:"artist_display"`
-	DateDisplay   string `json:"date_display"`
-	MediumDisplay string `json:"medium_display"`
-	Dimensions    string `json:"dimensions"`
-	PlaceOfOrigin string `json:"place_of_origin"`
-	Description   string `json:"description,omitempty"`
-	ThumbnailURL  string `json:"thumbnail_url,omitempty"`
-	URL           string `json:"url"`
+	ID          int    `kit:"id" json:"id"`
+	Title       string `json:"title"`
+	Artist      string `json:"artist"`
+	Date        string `json:"date"`
+	Medium      string `json:"medium"`
+	Dimensions  string `json:"dimensions"`
+	Type        string `json:"type"`
+	Origin      string `json:"origin"`
+	Description string `json:"description"`
+	CreditLine  string `json:"credit_line"`
+	ImageID     string `json:"image_id"`
 }
 
-// Agent holds the public data about an artist or organization.
-type Agent struct {
-	ID          int    `json:"id"`
-	Title       string `json:"title"`
-	Description string `json:"description,omitempty"`
-	AgentType   string `json:"agent_type"`
-	BirthDate   int    `json:"birth_date,omitempty"`
-	DeathDate   int    `json:"death_date,omitempty"`
-	URL         string `json:"url"`
+// Artist holds the public data about an artist or organization.
+type Artist struct {
+	ID          int    `kit:"id" json:"id"`
+	Name        string `json:"name"`
+	BirthDate   int    `json:"birth_date"`
+	DeathDate   int    `json:"death_date"`
+	BirthPlace  string `json:"birth_place"`
+	DeathPlace  string `json:"death_place"`
+	Description string `json:"description"`
 }
 
 // Exhibition holds the public data about a museum exhibition.
 type Exhibition struct {
-	ID      int    `json:"id"`
-	Title   string `json:"title"`
-	Status  string `json:"status"`
-	StartAt string `json:"start_at,omitempty"`
-	EndAt   string `json:"end_at,omitempty"`
-	URL     string `json:"url"`
+	ID          int    `kit:"id" json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+	StartAt     string `json:"start_at"`
+	EndAt       string `json:"end_at"`
 }
 
 // --- wire types ---
 
 type wireArtwork struct {
-	ID            int    `json:"id"`
-	Title         string `json:"title"`
-	ArtistDisplay string `json:"artist_display"`
-	DateDisplay   string `json:"date_display"`
-	MediumDisplay string `json:"medium_display"`
-	Dimensions    string `json:"dimensions"`
-	PlaceOfOrigin string `json:"place_of_origin"`
-	Description   string `json:"description"`
-	Thumbnail     struct {
-		URL string `json:"url"`
-	} `json:"thumbnail"`
+	ID               int    `json:"id"`
+	Title            string `json:"title"`
+	ArtistTitle      string `json:"artist_title"`
+	DateDisplay      string `json:"date_display"`
+	MediumDisplay    string `json:"medium_display"`
+	Dimensions       string `json:"dimensions"`
+	ArtworkTypeTitle string `json:"artwork_type_title"`
+	PlaceOfOrigin    string `json:"place_of_origin"`
+	Description      string `json:"description"`
+	ImageID          string `json:"image_id"`
+	CreditLine       string `json:"credit_line"`
 }
 
-type wireAgent struct {
-	ID             int    `json:"id"`
-	Title          string `json:"title"`
-	Description    string `json:"description"`
-	AgentTypeTitle string `json:"agent_type_title"`
-	BirthDate      int    `json:"birth_date"`
-	DeathDate      int    `json:"death_date"`
+// wireArtist uses *int for DeathDate to handle null JSON values.
+type wireArtist struct {
+	ID          int     `json:"id"`
+	Title       string  `json:"title"`
+	BirthDate   int     `json:"birth_date"`
+	DeathDate   *int    `json:"death_date"`
+	BirthPlace  string  `json:"birth_place"`
+	DeathPlace  string  `json:"death_place"`
+	Description string  `json:"description"`
 }
 
 type wireExhibition struct {
-	ID      int    `json:"id"`
-	Title   string `json:"title"`
-	Status  string `json:"status"`
-	StartAt string `json:"aic_start_at"`
-	EndAt   string `json:"aic_end_at"`
+	ID               int    `json:"id"`
+	Title            string `json:"title"`
+	ShortDescription string `json:"short_description"`
+	Status           string `json:"status"`
+	StartAt          string `json:"aic_start_at"`
+	EndAt            string `json:"aic_end_at"`
 }
 
 type wireArtworksResp struct {
@@ -105,8 +110,12 @@ type wireSingleArtworkResp struct {
 	Data wireArtwork `json:"data"`
 }
 
-type wireAgentsResp struct {
-	Data []wireAgent `json:"data"`
+type wireArtistsResp struct {
+	Data []wireArtist `json:"data"`
+}
+
+type wireSingleArtistResp struct {
+	Data wireArtist `json:"data"`
 }
 
 type wireExhibitionsResp struct {
@@ -127,7 +136,7 @@ func DefaultConfig() Config {
 	return Config{
 		BaseURL:   BaseURL,
 		UserAgent: DefaultUserAgent,
-		Rate:      200 * time.Millisecond,
+		Rate:      500 * time.Millisecond,
 		Timeout:   30 * time.Second,
 		Retries:   3,
 	}
@@ -149,41 +158,25 @@ func NewClient(cfg Config) *Client {
 	}
 }
 
-// artworkFields for list/search endpoints.
-const artworkFields = "id,title,artist_display,date_display,medium_display,dimensions,place_of_origin"
+// field sets for each resource type.
+const artworkSearchFields = "id,title,artist_title,date_display,medium_display,dimensions,artwork_type_title,place_of_origin"
+const artworkDetailFields = "id,title,artist_title,date_display,medium_display,dimensions,artwork_type_title,place_of_origin,description,image_id,credit_line"
+const artistFields = "id,title,birth_date,death_date,birth_place,death_place,description"
+const exhibitionFields = "id,title,short_description,status,aic_start_at,aic_end_at"
 
-// artworkDetailFields for single artwork.
-const artworkDetailFields = "id,title,artist_display,date_display,medium_display,dimensions,place_of_origin,description,thumbnail"
-
-// agentFields for agents.
-const agentFields = "id,title,description,birth_date,death_date,agent_type_title"
-
-// exhibitionFields for exhibitions.
-const exhibitionFields = "id,title,status,aic_start_at,aic_end_at"
-
-// ListArtworks lists or searches artworks. If search is non-empty, it queries
-// /artworks/search?q=search; otherwise it queries /artworks.
-func (c *Client) ListArtworks(ctx context.Context, search string, limit int) ([]Artwork, error) {
+// SearchArtworks searches artworks by query string via Elasticsearch.
+func (c *Client) SearchArtworks(ctx context.Context, query string, limit int) ([]Artwork, error) {
 	if limit <= 0 {
-		limit = 20
+		limit = 10
 	}
 	if limit > 100 {
 		limit = 100
 	}
-
-	var rawURL string
-	if search != "" {
-		params := url.Values{}
-		params.Set("q", search)
-		params.Set("fields", artworkFields)
-		params.Set("limit", fmt.Sprintf("%d", limit))
-		rawURL = c.cfg.BaseURL + "/artworks/search?" + params.Encode()
-	} else {
-		params := url.Values{}
-		params.Set("fields", artworkFields)
-		params.Set("limit", fmt.Sprintf("%d", limit))
-		rawURL = c.cfg.BaseURL + "/artworks?" + params.Encode()
-	}
+	params := url.Values{}
+	params.Set("q", query)
+	params.Set("fields", artworkSearchFields)
+	params.Set("limit", strconv.Itoa(limit))
+	rawURL := c.cfg.BaseURL + "/artworks/search?" + params.Encode()
 
 	body, err := c.get(ctx, rawURL)
 	if err != nil {
@@ -214,45 +207,64 @@ func (c *Client) GetArtwork(ctx context.Context, id int) (*Artwork, error) {
 	return &a, nil
 }
 
-// ListAgents lists or searches agents (artists/organizations). If search is
-// non-empty, it queries /agents/search?q=search; otherwise /agents.
-func (c *Client) ListAgents(ctx context.Context, search string, limit int) ([]Agent, error) {
+// SearchArtists searches artists by name query string.
+// If query is numeric, it fetches a single artist by ID.
+func (c *Client) SearchArtists(ctx context.Context, query string, limit int) ([]Artist, error) {
 	if limit <= 0 {
-		limit = 20
+		limit = 10
 	}
 	if limit > 100 {
 		limit = 100
 	}
 
-	var rawURL string
-	if search != "" {
-		params := url.Values{}
-		params.Set("q", search)
-		params.Set("fields", agentFields)
-		params.Set("limit", fmt.Sprintf("%d", limit))
-		rawURL = c.cfg.BaseURL + "/agents/search?" + params.Encode()
-	} else {
-		params := url.Values{}
-		params.Set("fields", agentFields)
-		params.Set("limit", fmt.Sprintf("%d", limit))
-		rawURL = c.cfg.BaseURL + "/agents?" + params.Encode()
+	// numeric query → single artist by ID
+	if id, err := strconv.Atoi(query); err == nil {
+		artist, err := c.GetArtist(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		return []Artist{*artist}, nil
 	}
+
+	params := url.Values{}
+	params.Set("q", query)
+	params.Set("fields", artistFields)
+	params.Set("limit", strconv.Itoa(limit))
+	rawURL := c.cfg.BaseURL + "/artists?" + params.Encode()
 
 	body, err := c.get(ctx, rawURL)
 	if err != nil {
 		return nil, err
 	}
-	var resp wireAgentsResp
+	var resp wireArtistsResp
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("parse agents: %w", err)
+		return nil, fmt.Errorf("parse artists: %w", err)
 	}
-	return flattenAgents(resp.Data), nil
+	return flattenArtists(resp.Data), nil
 }
 
-// ListExhibitions lists museum exhibitions.
-func (c *Client) ListExhibitions(ctx context.Context, limit int) ([]Exhibition, error) {
+// GetArtist fetches a single artist by numeric ID.
+func (c *Client) GetArtist(ctx context.Context, id int) (*Artist, error) {
+	params := url.Values{}
+	params.Set("fields", artistFields)
+	rawURL := fmt.Sprintf("%s/artists/%d?%s", c.cfg.BaseURL, id, params.Encode())
+
+	body, err := c.get(ctx, rawURL)
+	if err != nil {
+		return nil, err
+	}
+	var resp wireSingleArtistResp
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("parse artist %d: %w", id, err)
+	}
+	a := flattenArtist(resp.Data)
+	return &a, nil
+}
+
+// ListExhibitions lists museum exhibitions, optionally filtered by status.
+func (c *Client) ListExhibitions(ctx context.Context, status string, limit int) ([]Exhibition, error) {
 	if limit <= 0 {
-		limit = 20
+		limit = 10
 	}
 	if limit > 100 {
 		limit = 100
@@ -260,7 +272,10 @@ func (c *Client) ListExhibitions(ctx context.Context, limit int) ([]Exhibition, 
 
 	params := url.Values{}
 	params.Set("fields", exhibitionFields)
-	params.Set("limit", fmt.Sprintf("%d", limit))
+	params.Set("limit", strconv.Itoa(limit))
+	if status != "" {
+		params.Set("query[term][status]", status)
+	}
 	rawURL := c.cfg.BaseURL + "/exhibitions?" + params.Encode()
 
 	body, err := c.get(ctx, rawURL)
@@ -271,7 +286,19 @@ func (c *Client) ListExhibitions(ctx context.Context, limit int) ([]Exhibition, 
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("parse exhibitions: %w", err)
 	}
-	return flattenExhibitions(resp.Data), nil
+	out := flattenExhibitions(resp.Data)
+
+	// client-side status filter if the API doesn't support it
+	if status != "" {
+		filtered := out[:0]
+		for _, ex := range out {
+			if ex.Status == status {
+				filtered = append(filtered, ex)
+			}
+		}
+		out = filtered
+	}
+	return out, nil
 }
 
 // get fetches a URL and returns the body, pacing and retrying as configured.
@@ -350,16 +377,17 @@ func backoff(attempt int) time.Duration {
 
 func flattenArtwork(w wireArtwork) Artwork {
 	return Artwork{
-		ID:            w.ID,
-		Title:         w.Title,
-		ArtistDisplay: w.ArtistDisplay,
-		DateDisplay:   w.DateDisplay,
-		MediumDisplay: w.MediumDisplay,
-		Dimensions:    w.Dimensions,
-		PlaceOfOrigin: w.PlaceOfOrigin,
-		Description:   w.Description,
-		ThumbnailURL:  w.Thumbnail.URL,
-		URL:           fmt.Sprintf("https://%s/artworks/%d", SiteHost, w.ID),
+		ID:          w.ID,
+		Title:       w.Title,
+		Artist:      w.ArtistTitle,
+		Date:        w.DateDisplay,
+		Medium:      w.MediumDisplay,
+		Dimensions:  w.Dimensions,
+		Type:        w.ArtworkTypeTitle,
+		Origin:      w.PlaceOfOrigin,
+		Description: w.Description,
+		CreditLine:  w.CreditLine,
+		ImageID:     w.ImageID,
 	}
 }
 
@@ -371,34 +399,38 @@ func flattenArtworks(ws []wireArtwork) []Artwork {
 	return out
 }
 
-func flattenAgent(w wireAgent) Agent {
-	return Agent{
+func flattenArtist(w wireArtist) Artist {
+	death := 0
+	if w.DeathDate != nil {
+		death = *w.DeathDate
+	}
+	return Artist{
 		ID:          w.ID,
-		Title:       w.Title,
-		Description: w.Description,
-		AgentType:   w.AgentTypeTitle,
+		Name:        w.Title,
 		BirthDate:   w.BirthDate,
-		DeathDate:   w.DeathDate,
-		URL:         fmt.Sprintf("https://%s/artists/%d", SiteHost, w.ID),
+		DeathDate:   death,
+		BirthPlace:  w.BirthPlace,
+		DeathPlace:  w.DeathPlace,
+		Description: w.Description,
 	}
 }
 
-func flattenAgents(ws []wireAgent) []Agent {
-	out := make([]Agent, len(ws))
+func flattenArtists(ws []wireArtist) []Artist {
+	out := make([]Artist, len(ws))
 	for i, w := range ws {
-		out[i] = flattenAgent(w)
+		out[i] = flattenArtist(w)
 	}
 	return out
 }
 
 func flattenExhibition(w wireExhibition) Exhibition {
 	return Exhibition{
-		ID:      w.ID,
-		Title:   w.Title,
-		Status:  w.Status,
-		StartAt: w.StartAt,
-		EndAt:   w.EndAt,
-		URL:     fmt.Sprintf("https://%s/exhibitions/%d", SiteHost, w.ID),
+		ID:          w.ID,
+		Title:       w.Title,
+		Description: w.ShortDescription,
+		Status:      w.Status,
+		StartAt:     w.StartAt,
+		EndAt:       w.EndAt,
 	}
 }
 
